@@ -1,0 +1,198 @@
+<html>
+	<head>
+		<title>Lecture 9 Scribe Notes</title>
+	</head>
+	<body>
+		<h1>Lecture 9: Synchronization primitives; deadlock</h1>
+		<h2>Winter 2016</h2>
+		<h2>Daniel Lau, Albert Liu</h2>
+		
+		<h3>Theory and Policy Issues</h3>
+		
+		<h4>Brief review of last time</h4>
+		<h5>Goldilocks Principle</h5>
+		<p>Goldilocks Principle concerns critical sections:</p>
+		<p>Critical sections should not be too small or you may have races and you probably hvae code that you don't need</p>
+		<p>If the code is too large, then you have no parallelism and your code stinks</p>
+		<p>To lock critical sections, we use code like so:
+			<code>
+					lock(obj);
+					perform delicate actions on obj
+					unlock(obj);
+			</code>
+		</p>
+		
+		<h4>Example: Bank Account Transfers</h4>
+		<p>Let us consider an example where we are transferring money from one account to another, "from" account -> "to" account. We can transfer money like so:
+			<pre><code>
+				lock("from" account);
+				remove money out of "from" account;
+				unlock("from" account);
+				lock("to" account);
+				add money into "to" account;
+				unlock("to" account);
+			</code></pre>
+		</p>
+		<p> However, notice that there are problems if a bank auditor looks into the critical section between unlock("from" account) and lock("to" account). The total balance in the bank won't add up. This means our critical section is <b>too</b> small! We can solve this issue by moving our locks and unlocks like so:
+			<pre><code>
+				lock("from" account);
+				lock("to" account);
+				remove money out of "from" account;
+				add money into "to" account;
+				unlock("to" account);
+				unlock("from" account);
+			</code></pre>
+		</p>
+		<p> However, this solution is non-optimal because you use multiple locks. If someone already has a lock on one of the resources, we end up waiting for an indefinite time, potentially resulting in a deadlock (if the critical section is too large as well)</p>
+		
+		<h4>Example: Auditing the Bank</h4>
+		<p>Let us now consider an example where we are auditing. If we audit the entire bank, we will need to put a lock on everything in the bank. However while auditing, nothing can be done. We can boot everyone off the system, but that is not optimal.</p>
+		<p>To solve this problem, we can assume for now that our file system will be able to take a snapshot, which we will perform the audit on. This does not really solve the problem, as it is equally advanced to implement file system snapshots. This will be a problem for another day.</p>
+		
+		<h3>Mechanisms</h3>
+		<p>How do we solve the locking problem?</p>
+		<h4>Implementing on a uniprocessor</h4>
+			<p>Assume</p>
+			<li>We have one processor</li>
+			<li>No other process is running</li>
+			<p>Solutions</p>
+			<li>During critical sections, disable interrupts (especially the clock interrupt)</li>
+			<li>Use cooperative multitasking, so no forced switching in the middle of a critical section</li>
+			
+		<h4>Implementing on a multiprocessor</h4>
+		<p>Let us assume a sample program involving pipes that we are implementing on our own</p>
+		<p><b>insert picture of the pipe here</b></p>
+		<p>We define a simple pipe with the following code:</p>
+		<pre><code>
+			struct pipe {
+				char buf[1024];
+				unsigned r, w;
+			}
+		</pre></code>
+		<p>To keep things simple, we will implement read and write system calls for 1 byte. Our example implementation of read and write is as follows:</p>
+		<pre><code>
+			bool write_pipe(struct pipe *p, char c){
+				lock(&p->lock); //add in after locks
+				if(p->w - p->r == 1024)
+					return false;
+				p->buf[p->w++%1024] = c;
+				unlock(&p->lock); //add in after locks
+				return true;
+			}
+			int read_pipe(struct pipe *p){
+				if(p->w == p->r)
+					return CHAR_MIN-1;
+				return p->buf[p->r++%1024];
+			}
+		</pre></code>
+		
+		<h4>Implementing Lock and Unlock</h4>
+		<p>We can implement lock and unlock as either:</p>
+		<li>As system calls (easily doable, but often times not fast enough) </li>
+		<li>As plain machine instructions (difficult, but very fast) </li>
+
+		<pre><code>
+		/*precondition: lock not held by the caller
+		postcondition: lock held by the caller*/
+		typedef char lock_t;
+		void lock(lock_t *l) {
+			while(*l)
+				continue;
+			*l = 1;
+		}
+
+		/*precondition: lock is held by the caller
+		postcondition: lock no longer held by the caller*/
+		void unlock(lock_t *l) {
+			*l = 0;
+		}
+	</code></pre>
+	<p>However, notice that there's a race condition present in the lock function. So lock needs a lock which needs a lock... which means we must turn to the hardware level </p>
+	<p>So how does hardware access actually work? Cache lines grab you 32 bytes (for example) at a time. So all loads and stores to RAM are 32 bytes at once </p>
+	<p><b>Demonstrate the cache coherence problem here</b></p>
+	<p>To solve the cache coherence problem, we can</p>
+	<li>Disable cache (bad solution, results in a heavy slowdown</li>
+	<li>Snoop the bus and invalidate cache (not optimal solution either, can slow down the program)</li>
+	<li>Use an instruction that can make the "while(*l) continue; *l = 1" block atomic</li>
+
+	<h4>Spin Locks</h4>
+	<p>In addition to implementing locks and unlocks, we need to actually have a lock data type for these "spin locks". </p>
+	<p>The spin locks should not be: </p>
+	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it not atomic)</li>
+	<li>too small (e.g. don't use unsigned char lock:1; bitfields, as that requires the ALU to shift your word to isolate the bit field and compute with it)</li>
+	<p>On x86 and x86-64 computers, int is acceptable as long as it is aligned</p>
+	<p>With choosing spin locks, we also need extra machine instructions for an atomic access to int, such as the additional instruction:</p>
+	<pre><code>
+		lock incl x
+	</pre></code>
+	<p>where x is an address in memory. By prepending lock to the instruction, the CPU sends out a warning over the bus enabling us to lock atomically.</p>
+
+	<p>We can also use a machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
+	<pre><code>
+		int xchgl(int *p, int val){
+			int old = *p;
+			*p = val;
+			return old;
+		}
+	</pre></code>
+	<pre><code>
+		asm("lock incl x");
+		asm("xchgl r, x");
+
+		void lock(int *l){
+			while(xchgl(l, 1))
+				continue;
+		}
+
+		lock(&l);
+		x = f(x);
+		unlock(&l);
+
+		BAD CODE BELOW
+		int old = x;
+		int new = f(x);
+		while(xchgl(&x, new) != old)
+			continue;
+		BAD CODE ABOVE
+
+		compare and swap instruction
+		bool cas(int *p, int old, int new){
+			if(*p == old){
+				*p = new;
+				return true;
+			}
+			else
+				return false;
+		}
+
+		do {
+			int old = x;
+			int new = f(x);
+		} while (cas(&x, old, f(x));
+
+	</pre></code>
+
+	<p>Key note: machine instructions enable us to make bigger building blocks in software. This is demonstrated by now correctly having the data buffer in our pipe proected by the lock_t data variable in our pipe struct</p>
+
+	<h4>Further problems with our pipe</h4>
+	<p>We cannot have a global lock, because otherwise if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from.</p>
+	<p>Coarse-Grained Locking, e.g. global lock</p>
+	<li><b>Good:</b> Simple to implement and use </li>
+	<li><b>Bad:</b> As shown previously, can be a performance bottleneck
+	<p>Fine-Grained Locking</p>
+	<li><b>Good:</b> Fewer bottlenecks </li>
+	<li><b>Bad:</b> Complex to implement </li>
+
+	<p>We also do not want to use separate read and write locks, because it's not standard and easily adaptable. Solution if many readers and few writers?</p>
+	<pre><code>
+		reader:
+		while((c = read_pipe(&p)) == CHAR_MIN-1)
+			yield(); //so as not to continue eating CPU time while attempting to read
+		do_work(); //reach this when successfully read
+		//this involves cooperative multitasking!
+	</pre></code>
+
+	<h3>Further problems for the future</h3>
+	<p>What if we have a smal number of writers and a large number of readers waiting on a pipe (useless readers)? We need our scheduler to have some way of skipping over all those readers.</p>
+	</body>
+</html>
