@@ -68,15 +68,15 @@
 		<p>So how do we solve the locking problem? This requires us to consider implementations.</p>
 		<div>
 		<h4>Implementing on a uniprocessor</h4>
-			<p>Assume</p>
+			<p>Assumptions</p>
 			<ul>
 			<li>We have one processor</li>
 			<li>No other process is running</li>
 			</ul>
 			<p>Solutions</p>
 			<ul>
-			<li>During critical sections, disable interrupts (especially the clock interrupt)</li>
-			<li>Use cooperative multitasking, so no forced switching in the middle of a critical section</li>
+			<li>Disable interrupts (especially the clock interrupt) during critical sections</li>
+			<li>Use cooperative multitasking so no context switching is forced during a critical section</li>
 			</ul>
 		<h4>Implementing on a multiprocessor</h4>
 		<p>Let us assume a sample program involving pipes that we are implementing on our own</p>
@@ -105,7 +105,7 @@
 	}
 	</pre></code>
 		
-		<h4 id="implementing-lock-and-unlock">Implementing Lock and Unlock</h4>
+		<h4 id="implementing-lock-and-unlock">Developing a Synchronization Primitive: Implementing Lock and Unlock</h4>
 		<p>We can implement lock and unlock as either:</p>
 		<ul>
 		<li>As system calls (easily doable, but often times not fast enough) </li>
@@ -136,40 +136,45 @@
 	<ul>
 		<li>Disable cache (bad solution, results in a heavy slowdown</li>
 		<li>Snoop the bus and invalidate cache (not optimal solution either, can slow down the program)</li>
-		<li>Use an instruction that can make the "while(*l) continue; *l = 1" block atomic</li>
+		<li>Use an instruction that can make the lock function atomic</li>
 	</ul>
 
 	<h4 id="spin-locks">Spin Locks</h4>
-	<p>In addition to implementing locks and unlocks, we need to actually have a lock data type for these "spin locks". </p>
+	<p>Spin locks are a particular type of lock in which a thread trying to acquire a resource will simply wait in a loop and "spin", constantly checking if the lock is available. Because spin locks employ this sort of busy waiting, they consume valuable CPU time. However, they are particularly easy to implement and are additionally lightweight. In this section, we will formulate how to implement spin locks, adapting our naive implementation of lock and unlock above. We will see that the functionality of spin locks are very similar to the basic lock implementation above. However, spin locks have atomicity and prevent race conditions.</p>
 	<p>The spin locks should not be: </p>
 	<ul>
-	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it not atomic)</li>
+	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it non-atomic on the hardware level)</li>
 	<li>too small (e.g. don't use unsigned char lock:1; bitfields, as that requires the ALU to shift your word to isolate the bit field and compute with it)</li>
 	</ul>
 	<p>On x86 and x86-64 computers, int is acceptable as long as it is aligned</p>
 	<p>With choosing spin locks, we also need extra machine instructions for an atomic access to int, such as the additional instruction:</p>
 	<pre><code>
-	lock incl x
+	lock incl (mem_addr)
 	</pre></code>
-	<p>where x is an address in memory. By prepending lock to the instruction, the CPU sends out a warning over the bus enabling us to lock atomically.</p>
+	<p>By prepending lock to the instruction, the CPU sends out a warning over the bus enabling us to lock atomically.</p>
 
-	<p>We can also use a machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
+	<p>For implementing a spin lock, we use the machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
 	<pre><code>
+	//store val into *p and return original value held by p
 	int xchgl(int *p, int val){
 		int old = *p;
 		*p = val;
 		return old;
 	}
 	</pre></code>
-	<pre><code>
-	asm("lock incl x");
-	asm("xchgl r, x");
 
+	Upon trying to acquire a lock, we can use the code below, where we atomically check for whether the lock is available. Since the lock is not available unless the value stored in l is 1, we will "spin" inside the while loop until the lock is available, where the value stored in l is 0.
+
+	<pre><code>
 	void lock(int *l){
 		while(xchgl(l, 1))
 			continue;
 	}
+	</pre></code>
 
+	<pre><b>Explain the shit below.</b></pre>
+
+	<pre><code><!-- 
 	lock(&l);
 	x = f(x);
 	unlock(&l);
@@ -179,9 +184,9 @@
 	int new = f(x);
 	while(xchgl(&x, new) != old)
 		continue;
-	BAD CODE ABOVE
-
-	compare and swap instruction
+	BAD CODE ABOVE -->
+	//compare and swap instruction
+	//if *p == old, store new into p
 	bool cas(int *p, int old, int new){
 		if(*p == old){
 			*p = new;
@@ -198,6 +203,13 @@
 	</pre></code>
 
 	<p>Key note: machine instructions enable us to make bigger building blocks in software. This is demonstrated by now correctly having the data buffer in our pipe proected by the lock_t data variable in our pipe struct</p>
+
+	<pre><code>
+	So we've successfully created three different machine instructions:
+	asm("lock incl m");
+	asm("xchgl r, m");
+	asm("cas r, m")
+	</pre></code>
 
 	<h4>Further problems with our pipe</h4>
 	<p>We cannot have a global lock, because otherwise if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from.</p>
