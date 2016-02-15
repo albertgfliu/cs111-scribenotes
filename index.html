@@ -17,8 +17,12 @@
 			<li><u><a href="#example-bank-account-transfers">Example: Bank Account Transfers</a></u></li>
 			<li><u><a href="#example-auditing-the-bank">Example: Auditing the Bank</a></u></li>
 			<li><u><a href="#mechanisms">Mechanisms</a></u></li>
-			<li><u><a href="#implementing-lock-and-unlock">Implementing Lock and Unlock</a></u></li>
-			<li><u><a href="#spin-locks">Spin Locks</a></u></li>
+			<li><u><a href="#example-basic-pipe">Example: Basic Pipe</a></u></li>
+			<li><u><a href="#developing-spinlocks">Developing a Synchronization Primitive: Spinlocks</a></u></li>
+			<li><u><a href="#cache-coherency-problem">The Cache Coherency Problem</a></u></li>
+			<li><u><a href="#spin-locks">Returning to Spin Locks: Implementing with Machine Instructions</a></u></li>
+			<li><u><a href="#returning-to-pipe">Returning to the Pipe: Further Problems</a></u></li>
+			<li><u><a href="#future-problems">Problems for the Future</a></u></li>
 		</ol>
 
 		<h3 id="theory-and-policy-issues">Theory and Policy Issues</h3>
@@ -78,9 +82,9 @@
 			<li>Disable interrupts, especially the clock interrupt, during critical sections (on Linux we can use pthread_sigmask() temporarily)</li>
 			<li>Use cooperative multitasking so no context switching is forced during a critical section</li>
 			</ul>
-		<h4>Implementing on a multiprocessor</h4>
-		<p>Let us assume a sample program involving pipes that we are implementing on our own</p>
-		<p><b>insert picture of the pipe here</b></p>
+		<h4 id="example-basic-pipe">Example: Basic Pipe (Implementing on a multiprocessor)</h4>
+
+		<p>Let us assume a sample program involving pipes that we are implementing on our own. We will begin this example by discussing how to implement it on a uniprocessor with multiple threads, then discuss the problems facing us when implementing it on a multiprocessor.</p>
 		<p>We define a simple pipe with the following code:</p>
 	<pre><code>
 	struct pipe {
@@ -128,7 +132,7 @@
 	</pre></code>
 
 		
-		<h4 id="implementing-lock-and-unlock">Developing a Synchronization Primitive: Spinlocks</h4>
+		<h4 id="developing-spinlocks">Developing a Synchronization Primitive: Spinlocks</h4>
 		<p>We can implement lock and unlock as either:</p>
 		<ul>
 		<li>As system calls (easily doable, but often times not fast enough) </li>
@@ -230,8 +234,7 @@
 	asm("xchgl r, m");
 	asm("cas r, m")
 	</pre></code>
-
-	<h4>Further problems with our pipe</h4>
+	<h4 id="returning-to-pipe">Returning to the Pipe: Further Problems</h4>
 	<p>It may still be disadvantageous to use a spin lock as a global lock, because if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from. If N is a large number of threads, we end up with a large performance bottleneck as N-1 threads "spin", chewing up valuable CPU time.</p>
 	<p>Coarse-Grained Locking, e.g. global lock</p>
 	<ul>
@@ -252,7 +255,7 @@
 	do_work(); //reach this when successfully read
 	</pre></code>
 
-	<h3>Further problems for the future</h3>
+	<h3 id="future-problems">Problems for the Future</h3>
 	<p>What if, as posited before, we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? It is inefficient for each reader to yield in order, as having each reader attempt to read the pipe, realizing there is a lock, and then yielding to the next process consumes valuable CPU time. We need our scheduler to have some way of skipping over all those readers. Tune in next time to find out how!</p>
 
 </div>
