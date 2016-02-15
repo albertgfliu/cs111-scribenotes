@@ -59,7 +59,7 @@
 		<p> However, this solution is still <i>non-optimal</i> because we use multiple locks. If someone already has a lock on one of the resources, in this case account A or account B, we end up waiting for an indefinite time, with a potential for deadlocking if the critical section is too large.</p>
 		
 		<h4 id="example-auditing-the-bank">Example: Auditing the Bank</h4>
-		<p>As demonstrated previously, taking an audit can result in problems if our critical sections are too small and we audit in the middle of a transfer. Considering our proposed solution, if we decide to audit the entire bank, we will need to put a lock on all accounts. Clearly, this solution is not perfect as no transactions can be made during that time. It is also just as difficult to find an optimal time to perform the audit. If any transactions are being made while we request an audit, we need to wait for those transactions to complete and release the lock on the accounts. We can alternatively forcefully boot everyone off of the system, but this will result in unhappy users. </p>
+		<p>As demonstrated previously, taking an audit can result in problems if our critical sections are too small and we audit in the middle of a transfer. Considering our proposed solution, if we decide to audit the entire bank, we will need to put a lock on all accounts. Clearly, this solution is not optimal as no transactions can be made during that time. It is also just as difficult to find an optimal time to perform the audit. If any transactions are being made while we request an audit, we need to wait for those transactions to complete and release the lock on the accounts. We can alternatively forcefully boot everyone off of the system, but this will result in unhappy users. </p>
 		<p>Putting the problem of finding an optimal time aside, one solution to avoid locking all accounts involves assuming that our file system will be able to take a snapshot. We will then perform the audit on the snapshot, guaranteeing that no users will request locks on anything in the snapshot (as it does hold any actual accounts, only the status of them at a specific time). Implementing file system snapshots is fairly advanced to implement, which will be a problem for another day.</p>
 		
 		</div>
@@ -75,7 +75,7 @@
 			</ul>
 			<p>Solutions</p>
 			<ul>
-			<li>Disable interrupts (especially the clock interrupt) during critical sections</li>
+			<li>Disable interrupts, especially the clock interrupt, during critical sections (on Linux we can use pthread_sigmask() temporarily)</li>
 			<li>Use cooperative multitasking so no context switching is forced during a critical section</li>
 			</ul>
 		<h4>Implementing on a multiprocessor</h4>
@@ -88,14 +88,14 @@
 		unsigned r, w;
 	}
 	</pre></code>
-		<p>To keep things simple, we will implement read and write system calls for 1 byte. Our example implementation of read and write is as follows:</p>
+	<p>To keep things simple, we will implement read and write system calls for 1 byte. These implementations take into account the possibility that the buffer is full. A developed example implementation of read and write is as follows:</p>
 	<pre><code>
-	bool write_pipe(struct pipe *p, char c){
-		lock(&p->lock); //add in after locks
+	bool write_pipe(struct pipe *p, char c){)
 		if(p->w - p->r == 1024)
 			return false;
+		lock(&p->lock)
 		p->buf[p->w++%1024] = c;
-		unlock(&p->lock); //add in after locks
+		unlock(&p->lock);
 		return true;
 	}
 	int read_pipe(struct pipe *p){
@@ -104,15 +104,49 @@
 		return p->buf[p->r++%1024];
 	}
 	</pre></code>
+
+	<p>Note that there is a problem: Before the lock has been secured in write_pipe, the values of w and r could be modified by another thread after the if statement but before the call to lock. To solve this, we can do the following: </p>
+	<pre><code>
+	bool write_pipe(struct pipe *p, char c){)
+		lock(&p->lock)
+		bool full = (p->w - p->r == 1024);
+		if (full)
+			p->buf[p->w++%1024] = c;
+		unlock(&l);
+		return !full;
+	}
+	</pre></code>
+
+	<p>We can similarly modify read_pipe to r being modified: </p>
+	<pre><code>
+	int read_pipe(struct pipe *p){
+		lock(&p->l);
+		int c = (p->r != p->w) ? p->buf[p->r++%1024] : CHAR_MIN - 1;
+		unlock(&p->l);
+		return c;
+	}
+	</pre></code>
+
 		
-		<h4 id="implementing-lock-and-unlock">Developing a Synchronization Primitive: Implementing Lock and Unlock</h4>
+		<h4 id="implementing-lock-and-unlock">Developing a Synchronization Primitive: Spinlocks</h4>
 		<p>We can implement lock and unlock as either:</p>
 		<ul>
 		<li>As system calls (easily doable, but often times not fast enough) </li>
 		<li>As plain machine instructions (difficult, but very fast) </li>
+		</ul>
+		<p>Because system calls will incur a heavy performance cost, we will implement it in machine instructions.</p>
+
+	<p>Spin locks are a particular type of lock in which a thread trying to acquire a resource will simply wait in a loop and "spin", constantly checking if the lock is available. Because spin locks employ this sort of busy waiting, they consume valuable CPU time. However, they are particularly easy to implement and are additionally lightweight (in part due to utilizing machine instructions). In this section, we will formulate the implementation spin locks, working our way from a software model of lock implementation and adapting it into machine instructions.</p>
+	<p>Spin locks should not be: </p>
+	<ul>
+	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it non-atomic on the hardware level)</li>
+	<li>too small (e.g. don't use unsigned char lock:1; bitfields, as that requires the ALU to shift your word to isolate the bit field and compute with it)</li>
 	</ul>
+	<p>On x86 and x86-64 computers, int is acceptable as long as it is aligned</p>
 
 	<pre><code>
+	typedef int lock_t;
+
 	/*precondition: lock not held by the caller
 	postcondition: lock held by the caller*/
 	typedef char lock_t;
@@ -129,31 +163,28 @@
 	}
 	</code></pre>
 
-	<p>However, notice that there's a race condition present in the lock function. So lock needs a lock which needs a lock... which means we must turn to the hardware level </p>
-	<p>So how does hardware access actually work? Cache lines grab you 32 bytes (for example) at a time. So all loads and stores to RAM are 32 bytes at once </p>
-	<p><b>Demonstrate the cache coherence problem here</b></p>
-	<p>To solve the cache coherence problem, we can</p>
+	<p>However, notice that there is a race condition present in the lock function. So our lock needs a lock which needs a lock... which means we must turn to the hardware level!</p>
+
+	<h4 id="cache-coherency-problem">The Cache Coherency Problem</h4>
+	<p>Before we turn to implementing locks via machine instructions, let's discuss how memory access works and what problems we can run into. Cache lines grab a large number of bytes, for example, 32 bytes at a time. So all loads and stores to RAM are 32 bytes at once.</p>
+	<p>In a uniprocessor, each process does not know how other processes are modifying the cache. Process A may be trying to acquire a lock on resource X and checks the lock in cache, seeing that it is available. After the check, we suddenly context switch to process B. Process B then acquires the lock on resource X. Upon switching back to process A, process A believes that it can then acquire the lock when it has already been snatched away previously by B. The takeaway for cache coherency on a uniprocessor is that operations on a memory location must happen in order atomically.</p>
+	<p>In a multiprocessor, since each cache is only visible to its associated CPU, we run into a problem if processes running on separate CPUs want to access the same resource. If a process on CPU A accesses resource X and puts a lock on it, that lock may not be reflected in CPU B's cache, especially if CPU B previously loaded that resource into its cache. This problem results in inconsistent caches, leading CPU B to believe that it can use resource X when it should not be doing so.</p>
+	<p>
 	<ul>
-		<li>Disable cache (bad solution, results in a heavy slowdown</li>
-		<li>Snoop the bus and invalidate cache (not optimal solution either, can slow down the program)</li>
-		<li>Use an instruction that can make the lock function atomic</li>
+		<li>Disable cache (bad solution, results in a heavy slowdown, solves most cache coherency problems)</li>
+		<li>Snoop the bus and invalidate cache (not optimal solution either, can slow down the program, but helps solve cache coherency on multiprocessor)</li>
+		<li>Use an instruction that can make the lock function atomic (solves uniprocessor problem)</li>
 	</ul>
 
-	<h4 id="spin-locks">Spin Locks</h4>
-	<p>Spin locks are a particular type of lock in which a thread trying to acquire a resource will simply wait in a loop and "spin", constantly checking if the lock is available. Because spin locks employ this sort of busy waiting, they consume valuable CPU time. However, they are particularly easy to implement and are additionally lightweight. In this section, we will formulate how to implement spin locks, adapting our naive implementation of lock and unlock above. We will see that the functionality of spin locks are very similar to the basic lock implementation above. However, spin locks have atomicity and prevent race conditions.</p>
-	<p>The spin locks should not be: </p>
-	<ul>
-	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it non-atomic on the hardware level)</li>
-	<li>too small (e.g. don't use unsigned char lock:1; bitfields, as that requires the ALU to shift your word to isolate the bit field and compute with it)</li>
-	</ul>
-	<p>On x86 and x86-64 computers, int is acceptable as long as it is aligned</p>
-	<p>With choosing spin locks, we also need extra machine instructions for an atomic access to int, such as the additional instruction:</p>
+	<h4 id="spin-locks">Returning to Spin Locks: Implementing with Machine Instructions</h4>
+	
+	<p>As formulated previously, we need a machine instructions for atomic accesses. To assist us in implementing atomic access, modern processors have instructions such as:</p>
 	<pre><code>
 	lock incl (mem_addr)
 	</pre></code>
-	<p>By prepending lock to the instruction, the CPU sends out a warning over the bus enabling us to lock atomically.</p>
+	<p>By prepending lock to the instruction, the CPU sends out a warning over the bus, invalidating caches on other processors, enabling us to lock atomically and maintain cache coherency.</p>
 
-	<p>For implementing a spin lock, we use the machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
+	<p>We also use the machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
 	<pre><code>
 	//store val into *p and return original value held by p
 	int xchgl(int *p, int val){
@@ -172,19 +203,9 @@
 	}
 	</pre></code>
 
-	<pre><b>Explain the shit below.</b></pre>
+	<p>While xchgl does enable us to build our spin lock primitive, it is still not enough, since we did not check for coherency in our cache. We introduce a new instruction, Compare And Swap (CAS), which will let us check if the data we are operating on was modified (and hence invalidated), regardless of whether or not we acquired the lock:</p>
 
-	<pre><code><!-- 
-	lock(&l);
-	x = f(x);
-	unlock(&l);
-
-	BAD CODE BELOW
-	int old = x;
-	int new = f(x);
-	while(xchgl(&x, new) != old)
-		continue;
-	BAD CODE ABOVE -->
+	<pre><code>
 	//compare and swap instruction
 	//if *p == old, store new into p
 	bool cas(int *p, int old, int new){
@@ -199,20 +220,19 @@
 	do {
 		int old = x;
 		int new = f(x);
-	} while (cas(&x, old, f(x));
+	} while (cas(&x, old, f(x)); //cas lets us check if the data in memory location x was modified during the time f(x) was running
 	</pre></code>
 
-	<p>Key note: machine instructions enable us to make bigger building blocks in software. This is demonstrated by now correctly having the data buffer in our pipe proected by the lock_t data variable in our pipe struct</p>
+	<p>Key note: Machine instructions enable us to make bigger building blocks in software such as spin locks, enabling us to do neat things like multi-threading. Our data buffer in the pipe can now be adequately protected by the lock_t data type in our pipe struct. We have successfully created three different machine instructions, each with varying capabilities for enabling synchronization primitives:</p>
 
 	<pre><code>
-	So we've successfully created three different machine instructions:
 	asm("lock incl m");
 	asm("xchgl r, m");
 	asm("cas r, m")
 	</pre></code>
 
 	<h4>Further problems with our pipe</h4>
-	<p>We cannot have a global lock, because otherwise if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from.</p>
+	<p>It may still be disadvantageous to use a spin lock as a global lock, because if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from. If N is a large number of threads, we end up with a large performance bottleneck as N-1 threads "spin", chewing up valuable CPU time.</p>
 	<p>Coarse-Grained Locking, e.g. global lock</p>
 	<ul>
 	<li><b>Good:</b> Simple to implement and use </li>
@@ -224,17 +244,16 @@
 	<li><b>Bad:</b> Complex to implement </li>
 	</ul>
 
-	<p>We also do not want to use separate read and write locks, because it's not standard and easily adaptable. Solution if many readers and few writers?</p>
+	<p>We also do not want to use separate read and write locks, because it's not standard and easily adaptable. If we have many readers and few writers, we could use the following solution:</p>
 	<pre><code>
-	reader:
+	reader: //this involves cooperative multitasking!
 	while((c = read_pipe(&p)) == CHAR_MIN-1)
 		yield(); //so as not to continue eating CPU time while attempting to read
 	do_work(); //reach this when successfully read
-	//this involves cooperative multitasking!
 	</pre></code>
 
 	<h3>Further problems for the future</h3>
-	<p>What if we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? We need our scheduler to have some way of skipping over all those readers... Tune in next time to find out how!</p>
+	<p>What if, as posited before, we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? It is inefficient for each reader to yield in order, as having each reader attempt to read the pipe, realizing there is a lock, and then yielding to the next process consumes valuable CPU time. We need our scheduler to have some way of skipping over all those readers. Tune in next time to find out how!</p>
 
 </div>
 	</body>
