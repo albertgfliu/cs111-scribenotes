@@ -2,14 +2,25 @@
 	<head>
 		<title>Lecture 9 Scribe Notes</title>
 
-		<link type="text/css" rel="stylesheet" href="scribenotescss.css" />
+		<link type="text/css" rel="stylesheet" href="indexcss.css" />
 	</head>
 	<body>
 		<h1>Lecture 9: Synchronization primitives; deadlock</h1>
 		<h2>Winter 2016</h2>
 		<h2>Daniel Lau, Albert Liu</h2>
 		
-		<h3>Theory and Policy Issues</h3>
+
+		<p>Topics covered in this lecture:</p>
+		<ol>
+			<li><u><a href="#theory-and-policy-issues">Theory and Policy Issues</a></u></li>
+			<li><u><a href="#example-bank-account-transfers">Example: Bank Account Transfers</a></u></li>
+			<li><u><a href="#example-auditing-the-bank">Example: Auditing the Bank</a></u></li>
+			<li><u><a href="#mechanisms">Mechanisms</a></u></li>
+			<li><u><a href="#implementing-lock-and-unlock">Implementing Lock and Unlock</a></u></li>
+			<li><u><a href="#spin-locks">Spin Locks</a></u></li>
+		</ol>
+
+		<h3 id="theory-and-policy-issues">Theory and Policy Issues</h3>
 		
 		<h4>Brief review of last time</h4>
 		<h5>Goldilocks Principle</h5>
@@ -24,7 +35,7 @@
 			</code>
 		</p>
 		
-		<h4>Example: Bank Account Transfers</h4>
+		<h4 id="example-bank-account-transfers">Example: Bank Account Transfers</h4>
 		<p>Let us consider an example where we are transferring money from one account to another, "from" account -> "to" account. We can transfer money like so:
 			<pre><code>
 				lock("from" account);
@@ -47,11 +58,11 @@
 		</p>
 		<p> However, this solution is non-optimal because you use multiple locks. If someone already has a lock on one of the resources, we end up waiting for an indefinite time, potentially resulting in a deadlock (if the critical section is too large as well)</p>
 		
-		<h4>Example: Auditing the Bank</h4>
+		<h4 id="example-auditing-the-bank">Example: Auditing the Bank</h4>
 		<p>Let us now consider an example where we are auditing. If we audit the entire bank, we will need to put a lock on everything in the bank. However while auditing, nothing can be done. We can boot everyone off the system, but that is not optimal.</p>
 		<p>To solve this problem, we can assume for now that our file system will be able to take a snapshot, which we will perform the audit on. This does not really solve the problem, as it is equally advanced to implement file system snapshots. This will be a problem for another day.</p>
 		
-		<h3>Mechanisms</h3>
+		<h3 id="mechanisms">Mechanisms</h3>
 		<p>How do we solve the locking problem?</p>
 		<h4>Implementing on a uniprocessor</h4>
 			<p>Assume</p>
@@ -88,26 +99,26 @@
 			}
 		</pre></code>
 		
-		<h4>Implementing Lock and Unlock</h4>
+		<h4 id="implementing-lock-and-unlock">Implementing Lock and Unlock</h4>
 		<p>We can implement lock and unlock as either:</p>
 		<li>As system calls (easily doable, but often times not fast enough) </li>
 		<li>As plain machine instructions (difficult, but very fast) </li>
 
-		<pre><code>
-		/*precondition: lock not held by the caller
-		postcondition: lock held by the caller*/
-		typedef char lock_t;
-		void lock(lock_t *l) {
-			while(*l)
-				continue;
-			*l = 1;
-		}
+	<pre><code>
+	/*precondition: lock not held by the caller
+	postcondition: lock held by the caller*/
+	typedef char lock_t;
+	void lock(lock_t *l) {
+		while(*l)
+			continue;
+		*l = 1;
+	}
 
-		/*precondition: lock is held by the caller
-		postcondition: lock no longer held by the caller*/
-		void unlock(lock_t *l) {
-			*l = 0;
-		}
+	/*precondition: lock is held by the caller
+	postcondition: lock no longer held by the caller*/
+	void unlock(lock_t *l) {
+		*l = 0;
+	}
 	</code></pre>
 	<p>However, notice that there's a race condition present in the lock function. So lock needs a lock which needs a lock... which means we must turn to the hardware level </p>
 	<p>So how does hardware access actually work? Cache lines grab you 32 bytes (for example) at a time. So all loads and stores to RAM are 32 bytes at once </p>
@@ -117,7 +128,7 @@
 	<li>Snoop the bus and invalidate cache (not optimal solution either, can slow down the program)</li>
 	<li>Use an instruction that can make the "while(*l) continue; *l = 1" block atomic</li>
 
-	<h4>Spin Locks</h4>
+	<h4 id="spin-locks">Spin Locks</h4>
 	<p>In addition to implementing locks and unlocks, we need to actually have a lock data type for these "spin locks". </p>
 	<p>The spin locks should not be: </p>
 	<li>too large (e.g. don't use typedef __int 128 lock_t as that requires two 64-bit instructions to process, making it not atomic)</li>
