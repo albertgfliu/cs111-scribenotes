@@ -11,7 +11,7 @@
 		<h2>Winter 2016</h2>
 		<h2>Daniel Lau, Albert Liu</h2>
 		
-
+		<div>
 		<p>Topics covered in this lecture:</p>
 		<ol>
 			<li><u><a href="#theory-and-policy-issues">Theory and Policy Issues</a></u></li>
@@ -21,7 +21,9 @@
 			<li><u><a href="#implementing-lock-and-unlock">Implementing Lock and Unlock</a></u></li>
 			<li><u><a href="#spin-locks">Spin Locks</a></u></li>
 		</ol>
+	</div>
 
+<div>
 		<h3 id="theory-and-policy-issues">Theory and Policy Issues</h3>
 		
 		<h4>Brief review of last time</h4>
@@ -30,11 +32,11 @@
 		<p>Critical sections should not be too small or you may have races and you probably hvae code that you don't need</p>
 		<p>If the code is too large, then you have no parallelism and your code stinks</p>
 		<p>To lock critical sections, we use code like so:
-			<code>
+			<pre><code>
 					lock(obj);
 					perform delicate actions on obj
 					unlock(obj);
-			</code>
+			</code></pre>
 		</p>
 		
 		<h4 id="example-bank-account-transfers">Example: Bank Account Transfers</h4>
@@ -64,6 +66,7 @@
 		<p>Let us now consider an example where we are auditing. If we audit the entire bank, we will need to put a lock on everything in the bank. However while auditing, nothing can be done. We can boot everyone off the system, but that is not optimal.</p>
 		<p>To solve this problem, we can assume for now that our file system will be able to take a snapshot, which we will perform the audit on. This does not really solve the problem, as it is equally advanced to implement file system snapshots. This will be a problem for another day.</p>
 		
+	</div>
 		<h3 id="mechanisms">Mechanisms</h3>
 		<p>How do we solve the locking problem?</p>
 		<h4>Implementing on a uniprocessor</h4>
@@ -208,6 +211,6 @@
 	</pre></code>
 
 	<h3>Further problems for the future</h3>
-	<p>What if we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? We need our scheduler to have some way of skipping over all those readers.</p>
+	<p>What if we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? We need our scheduler to have some way of skipping over all those readers... Tune in next time to find out how!</p>
 	</body>
 </html>
