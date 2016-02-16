@@ -1,3 +1,8 @@
+	
+	/*CS 111 Winter 2016 - Lecture 9 Scribe Notes
+	Albert Liu, Daniel Lau, Kevin Fan
+	indexcss.css validated as CSS 3*/
+
 html {
 	display: block;
 	font-family: Helvetica, Arial, sans-serif;
@@ -39,7 +44,7 @@ pre {
 
 code {
 	display: inline-block;
-	width: 60%;
+	width: 75%;
 	margin-left: 30px;
 	margin-right: 30px;
 	border-radius: 10px;

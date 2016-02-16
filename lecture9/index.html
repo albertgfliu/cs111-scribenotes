@@ -1,5 +1,10 @@
 <!DOCTYPE html>
 <html>
+	<!--
+		CS 111 Winter 2016 - Lecture 9 Scribe Notes
+		Albert Liu, Daniel Lau, Kevin Fan
+		index.html validated as HTML 5
+	-->
 	<head>
 		<meta charset="UTF-8">
 		<link type="text/css" rel="stylesheet" href="indexcss.css" />
@@ -8,7 +13,7 @@
 	</head>
 	<body>
 		<h1>CS 111 Winter 2016 - Lecture 9: Synchronization primitives; deadlock</h1>
-		<h2>Daniel Lau and Albert Liu</h2>
+		<h2>Albert Liu, Daniel Lau, and Kevin Fan</h2>
 		
 	
 		<h3>Lecture Topics:</h3>
@@ -25,10 +30,12 @@
 			<li><u><a href="#future-problems">Problems for the Future</a></u></li>
 		</ol>
 
+		<hr>
+
 		<h3 id="theory-and-policy-issues">Theory and Policy Issues</h3>
 		<div>
 			<h4>A brief review of the last lecture - Goldilocks Principle</h4>
-			<p>The Goldilocks Principle says that critical sections should not be</p>
+			<p>The Goldilocks Principle says that critical sections, which are important to synchronization, should not be</p>
 			<ul>
 				<li>too small, or many races could still occur</li>
 				<li>too large, because then there is not much parallelism and your code is terrible</li>
@@ -68,8 +75,10 @@
 		
 		</div>
 
+		<hr>
+
 		<h3 id="mechanisms">Mechanisms</h3>
-		<p>So how do we solve the locking problem? This requires us to consider implementations.</p>
+		<p>So how do actually implement synchronization? We will cover just a few of many ways in today's lecture, keeping in mind our higher-level goals.</p>
 		<div>
 		<h4>Implementing on a uniprocessor</h4>
 			<p>Assumptions</p>
@@ -91,7 +100,7 @@
 		char buf[1024];
 		unsigned r, w;
 	}
-	</pre></code>
+	</code></pre>
 	<p>To keep things simple, we will implement read and write system calls for 1 byte. These implementations take into account the possibility that the buffer is full. A developed example implementation of read and write is as follows:</p>
 	<pre><code>
 	bool write_pipe(struct pipe *p, char c){)
@@ -107,7 +116,7 @@
 			return CHAR_MIN-1;
 		return p->buf[p->r++%1024];
 	}
-	</pre></code>
+	</code></pre>
 
 	<p>Note that there is a problem: Before the lock has been secured in write_pipe, the values of w and r could be modified by another thread after the if statement but before the call to lock. To solve this, we can do the following: </p>
 	<pre><code>
@@ -119,9 +128,9 @@
 		unlock(&l);
 		return !full;
 	}
-	</pre></code>
+	</code></pre>
 
-	<p>We can similarly modify read_pipe to r being modified: </p>
+	<p>We can similarly modify read_pipe with locks to ensure r is not being modified between the time we check for an empty pipe and return a value: </p>
 	<pre><code>
 	int read_pipe(struct pipe *p){
 		lock(&p->l);
@@ -129,7 +138,7 @@
 		unlock(&p->l);
 		return c;
 	}
-	</pre></code>
+	</code></pre>
 
 		
 		<h4 id="developing-spinlocks">Developing a Synchronization Primitive: Spinlocks</h4>
@@ -185,7 +194,7 @@
 	<p>As formulated previously, we need a machine instructions for atomic accesses. To assist us in implementing atomic access, modern processors have instructions such as:</p>
 	<pre><code>
 	lock incl (mem_addr)
-	</pre></code>
+	</code></pre>
 	<p>By prepending lock to the instruction, the CPU sends out a warning over the bus, invalidating caches on other processors, enabling us to lock atomically and maintain cache coherency.</p>
 
 	<p>We also use the machine instruction xchgl, which exchanges two values atomically. An example of its operation is shown below in C, but is atomic in hardware:</p>
@@ -196,7 +205,7 @@
 		*p = val;
 		return old;
 	}
-	</pre></code>
+	</code></pre>
 
 	Upon trying to acquire a lock, we can use the code below, where we atomically check for whether the lock is available. Since the lock is not available unless the value stored in l is 1, we will "spin" inside the while loop until the lock is available, where the value stored in l is 0.
 
@@ -205,9 +214,9 @@
 		while(xchgl(l, 1))
 			continue;
 	}
-	</pre></code>
+	</code></pre>
 
-	<p>While xchgl does enable us to build our spin lock primitive, it is still not enough, since we did not check for coherency in our cache. We introduce a new instruction, Compare And Swap (CAS), which will let us check if the data we are operating on was modified (and hence invalidated), regardless of whether or not we acquired the lock:</p>
+	<p>While xchgl does enable us to build our spin lock primitive, it is still not enough, since we did not check for coherency in our cache. We introduce a new instruction, Compare And Swap (CAS), which will let us check if the data x we are operating on was modified (and hence invalidated) while f(x) was running, regardless of whether or not we acquired the lock:</p>
 
 	<pre><code>
 	//compare and swap instruction
@@ -224,8 +233,8 @@
 	do {
 		int old = x;
 		int new = f(x);
-	} while (cas(&x, old, f(x)); //cas lets us check if the data in memory location x was modified during the time f(x) was running
-	</pre></code>
+	} while (cas(&x, old, f(x));
+	</code></pre>
 
 	<p>Key note: Machine instructions enable us to make bigger building blocks in software such as spin locks, enabling us to do neat things like multi-threading. Our data buffer in the pipe can now be adequately protected by the lock_t data type in our pipe struct. We have successfully created three different machine instructions, each with varying capabilities for enabling synchronization primitives:</p>
 
@@ -233,7 +242,7 @@
 	asm("lock incl m");
 	asm("xchgl r, m");
 	asm("cas r, m")
-	</pre></code>
+	</code></pre>
 	<h4 id="returning-to-pipe">Returning to the Pipe: Further Problems</h4>
 	<p>It may still be disadvantageous to use a spin lock as a global lock, because if we have N threads accessing any pipe, at worst case we will have N-1 threads spinning while the pipe is being written or read from. If N is a large number of threads, we end up with a large performance bottleneck as N-1 threads "spin", chewing up valuable CPU time.</p>
 	<p>Coarse-Grained Locking, e.g. global lock</p>
@@ -253,7 +262,9 @@
 	while((c = read_pipe(&p)) == CHAR_MIN-1)
 		yield(); //so as not to continue eating CPU time while attempting to read
 	do_work(); //reach this when successfully read
-	</pre></code>
+	</code></pre>
+
+	<hr>
 
 	<h3 id="future-problems">Problems for the Future</h3>
 	<p>What if, as posited before, we have a small number of writers and a large number of readers waiting on a pipe (useless readers)? It is inefficient for each reader to yield in order, as having each reader attempt to read the pipe, realizing there is a lock, and then yielding to the next process consumes valuable CPU time. We need our scheduler to have some way of skipping over all those readers. Tune in next time to find out how!</p>
